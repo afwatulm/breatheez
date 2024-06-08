@@ -1,0 +1,139 @@
+#define BLYNK_TEMPLATE_ID "TMPL6np_pbtfZ"
+#define BLYNK_TEMPLATE_NAME "Sistem Pemantauan Kualitas Udara"
+#define BLYNK_AUTH_TOKEN "UozwRfktnT1Co6U5lm9rL6h-VshQzEg8"
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+
+// Blynk credentials
+char auth[] = BLYNK_AUTH_TOKEN;
+char ssid[] = "Wokwi-GUEST";
+char pass[] = "";
+
+// Pin definitions
+const int mq135Pin = A0;  // GPIO pin for ADC reading on ESP32
+const int redPin = 14;    // Red pin of the RGB LED
+const int greenPin = 12;  // Green pin of the RGB LED
+const int bluePin = 27;   // Blue pin of the RGB LED
+const int buzzer = 4;
+const int relay = 33;
+
+// Variables to store state
+bool manualOverride = false;
+
+BlynkTimer timer;
+
+void setup() {
+  Serial.begin(9600);
+  Blynk.begin(auth, ssid, pass);
+
+  pinMode(mq135Pin, INPUT);
+  pinMode(redPin, OUTPUT);
+  pinMode(greenPin, OUTPUT);
+  pinMode(bluePin, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(relay, OUTPUT);
+
+  digitalWrite(redPin, LOW);
+  digitalWrite(greenPin, LOW);
+  digitalWrite(bluePin, LOW);
+  digitalWrite(buzzer, LOW);
+  digitalWrite(relay, LOW);
+
+  // Setup a function to be called every second
+  timer.setInterval(1000L, checkAirQuality);
+}
+
+void checkAirQuality() {
+  int airQualityRaw = analogRead(mq135Pin);
+  int airQualityPercentage = map(airQualityRaw, 0, 4095, 0, 250);  // ESP32 ADC is 12-bit (0-4095)
+
+  Serial.print("Air Quality (raw): ");
+  Serial.println(airQualityRaw);
+  Serial.print("Air Quality (%): ");
+  Serial.println(airQualityPercentage);
+
+  if (manualOverride) {
+    // Manual override active
+    return;
+  }
+
+  // Set the LED color based on the MQ135 value
+  if (airQualityPercentage >= 0 && airQualityPercentage <= 50) {
+    // Good
+    setColor(0, 255, 0);
+    digitalWrite(buzzer, LOW);
+    digitalWrite(relay, LOW);
+  } else if (airQualityPercentage >= 51 && airQualityPercentage <= 100) {
+    // Moderate
+    setColor(255, 255, 0);
+    digitalWrite(buzzer, LOW);
+    digitalWrite(relay, LOW);
+  } else if (airQualityPercentage >= 101 && airQualityPercentage <= 150) {
+    // Sensitive
+    setColor(255, 165, 0);
+    digitalWrite(buzzer, LOW);
+    digitalWrite(relay, LOW);
+  } else if (airQualityPercentage >= 151 && airQualityPercentage <= 200) {
+    // Unhealthy
+    setColor(255, 0, 0);
+    digitalWrite(buzzer, HIGH);
+    digitalWrite(relay, HIGH);
+  } else {
+    // Hazaourt
+    setColor(128, 0, 128);
+    digitalWrite(buzzer, HIGH);
+    digitalWrite(relay, HIGH);  // Turn on air purifier
+  }
+
+  // Blynk virtual writes
+  Blynk.virtualWrite(V1, airQualityPercentage);
+
+  if (airQualityPercentage >= 0 && airQualityPercentage <= 50) {
+    Blynk.virtualWrite(V2, 255); // Green LED ON
+    Blynk.virtualWrite(V3, 0);   // Yellow LED OFF
+    Blynk.virtualWrite(V4, 0);   // Red LED OFF
+  } else if (airQualityPercentage >= 51 && airQualityPercentage <= 100) {
+    Blynk.virtualWrite(V2, 0);   // Green LED OFF
+    Blynk.virtualWrite(V3, 255); // Yellow LED ON
+    Blynk.virtualWrite(V4, 0);   // Red LED OFF
+  } else if (airQualityPercentage >= 101 && airQualityPercentage <= 150) {
+    Blynk.virtualWrite(V2, 0);   // Green LED OFF
+    Blynk.virtualWrite(V3, 165); // Yellow LED ON (Orange)
+    Blynk.virtualWrite(V4, 0);   // Red LED OFF
+  } else if (airQualityPercentage >= 151 && airQualityPercentage <= 200) {
+    Blynk.virtualWrite(V2, 0);   // Green LED OFF
+    Blynk.virtualWrite(V3, 0);   // Yellow LED OFF
+    Blynk.virtualWrite(V4, 255); // Red LED ON
+  } else {
+    Blynk.virtualWrite(V2, 128); // Purple LED ON
+    Blynk.virtualWrite(V3, 0);   // Yellow LED OFF
+    Blynk.virtualWrite(V4, 128); // Red LED ON (Purple)
+  }
+}
+
+// Blynk write handler for manual override
+BLYNK_WRITE(V5) {
+  int pinValue = param.asInt(); // Get value as integer
+
+  if (pinValue == 0) {
+    // Manual override ON
+    manualOverride = true;
+    digitalWrite(relay, HIGH);  // Turn on air purifier
+  } else {
+    // Manual override OFF
+    manualOverride = false;
+    digitalWrite(relay, LOW);   // Turn off air purifier
+  }
+}
+
+void setColor(int red, int green, int blue) {
+  analogWrite(redPin, red);
+  analogWrite(greenPin, green);
+  analogWrite(bluePin, blue);
+}
+
+void loop() {
+  Blynk.run();
+  timer.run(); // Initiates BlynkTimer
+}
