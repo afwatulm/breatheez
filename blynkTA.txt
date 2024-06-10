@@ -1,0 +1,146 @@
+#define BLYNK_TEMPLATE_ID "TMPL6P-Ck75uc"
+#define BLYNK_TEMPLATE_NAME "Smoke Detector"
+#define BLYNK_AUTH_TOKEN "UcNvwlmUKE3sKflPhYf77_UpLpWmzYVv"
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+
+// Blynk credentials
+char auth[] = BLYNK_AUTH_TOKEN;
+char ssid[] = "Wokwi-GUEST";
+char pass[] = "";
+
+// Pin definitions
+const int mq135Pin = A0;  // GPIO pin for ADC reading on ESP32
+const int redPin = 27;    // Red pin of the RGB LED
+const int greenPin = 14;  // Green pin of the RGB LED
+const int bluePin = 12;   // Blue pin of the RGB LED
+const int buzzer = 4;
+const int relay = 33;
+
+// Variables to store state
+bool manualOverride = false;
+
+void setup() {
+  Serial.begin(9600);
+  Blynk.begin(auth, ssid, pass);
+
+  pinMode(mq135Pin, INPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(relay, OUTPUT);
+  pinMode(redPin, OUTPUT);
+  pinMode(greenPin, OUTPUT);
+  pinMode(bluePin, OUTPUT);
+
+  digitalWrite(buzzer, LOW);
+  digitalWrite(relay, LOW);
+  digitalWrite(redPin, LOW);
+  digitalWrite(greenPin, LOW);
+  digitalWrite(bluePin, LOW);
+}
+
+void checkAirQuality() {
+  int airQualityRaw = analogRead(mq135Pin);
+  int airQualityPercentage = map(airQualityRaw, 0, 4095, 0, 250);  // ESP32 ADC is 12-bit (0-4095)
+
+  Serial.print("Air Quality (raw): ");
+  Serial.println(airQualityRaw);
+  Serial.print("Air Quality (%): ");
+  Serial.println(airQualityPercentage);
+
+  if (manualOverride) {
+    // Manual override active
+    return;
+  }
+
+  // Set the LED color based on the MQ135 value
+  if (airQualityPercentage >= 0 && airQualityPercentage <= 50) {
+    // Good
+    setColor(LOW, HIGH, LOW);  // Green
+    stopBuzzing();
+    digitalWrite(relay, LOW);
+    Blynk.virtualWrite(V0, 255); // Good
+    Blynk.virtualWrite(V5, 0);   // Moderate OFF
+    Blynk.virtualWrite(V2, 0);   // Sensitive OFF
+    Blynk.virtualWrite(V3, 0);   // Unhealthy OFF
+    Blynk.virtualWrite(V4, 0);   // Hazardous OFF
+  } else if (airQualityPercentage >= 51 && airQualityPercentage <= 100) {
+    // Moderate
+    setColor(HIGH, HIGH, LOW); // Yellow
+    stopBuzzing();
+    digitalWrite(relay, LOW);
+    Blynk.virtualWrite(V0, 0);   // Good OFF
+    Blynk.virtualWrite(V5, 255); // Moderate
+    Blynk.virtualWrite(V2, 0);   // Sensitive OFF
+    Blynk.virtualWrite(V3, 0);   // Unhealthy OFF
+    Blynk.virtualWrite(V4, 0);   // Hazardous OFF
+  } else if (airQualityPercentage >= 101 && airQualityPercentage <= 150) {
+    // Sensitive
+    setColor(HIGH, LOW, LOW); // Orange
+    stopBuzzing();
+    digitalWrite(relay, LOW);
+    Blynk.virtualWrite(V0, 0);   // Good OFF
+    Blynk.virtualWrite(V5, 0);   // Moderate OFF
+    Blynk.virtualWrite(V2, 255); // Sensitive
+    Blynk.virtualWrite(V3, 0);   // Unhealthy OFF
+    Blynk.virtualWrite(V4, 0);   // Hazardous OFF
+  } else if (airQualityPercentage >= 151 && airQualityPercentage <= 200) {
+    // Unhealthy
+    setColor(HIGH, LOW, LOW); // Red
+    startBuzzing();
+    digitalWrite(relay, HIGH);
+    Blynk.virtualWrite(V0, 0);   // Good OFF
+    Blynk.virtualWrite(V5, 0);   // Moderate OFF
+    Blynk.virtualWrite(V2, 0);   // Sensitive OFF
+    Blynk.virtualWrite(V3, 255); // Unhealthy
+    Blynk.virtualWrite(V4, 0);   // Hazardous OFF
+  } else {
+    // Hazardous
+    setColor(HIGH, LOW, HIGH); // Purple
+    startBuzzing();
+    digitalWrite(relay, HIGH);  // Turn on air purifier
+    Blynk.virtualWrite(V0, 0);   // Good OFF
+    Blynk.virtualWrite(V5, 0);   // Moderate OFF
+    Blynk.virtualWrite(V2, 0);   // Sensitive OFF
+    Blynk.virtualWrite(V3, 0);   // Unhealthy OFF
+    Blynk.virtualWrite(V4, 255); // Hazardous
+  }
+
+  // Blynk virtual writes
+  Blynk.virtualWrite(V1, airQualityPercentage);
+}
+
+// Blynk write handler for manual override
+BLYNK_WRITE(V6) { // Changed virtual pin for manual override to V6 to avoid conflict with other pins
+  int pinValue = param.asInt(); // Get value as integer
+
+  if (pinValue == 1) { // Assuming 1 means ON and 0 means OFF for manual override
+    // Manual override ON
+    manualOverride = true;
+    digitalWrite(relay, HIGH);  // Turn on air purifier
+  } else {
+    // Manual override OFF
+    manualOverride = false;
+    digitalWrite(relay, LOW);   // Turn off air purifier
+  }
+}
+
+void setColor(int red, int green, int blue) {
+  digitalWrite(redPin, red);
+  digitalWrite(greenPin, green);
+  digitalWrite(bluePin, blue);
+}
+
+void startBuzzing() {
+  digitalWrite(buzzer, HIGH);
+}
+
+void stopBuzzing() {
+  digitalWrite(buzzer, LOW);
+}
+
+void loop() {
+  Blynk.run();
+  checkAirQuality();  // Check air quality in each loop
+  delay(1000);        // Wait for 1 second before the next check
+}
